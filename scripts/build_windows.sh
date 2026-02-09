@@ -2,9 +2,8 @@
 # Windows build script — runs in Git Bash on GitHub Actions Windows runners.
 #
 # Unlike Unix builds, Windows PostgreSQL is NOT compiled from source.
-# PGROOT must point to an existing PostgreSQL installation (set by the CI
-# workflow via ankane/setup-postgres or a manual install).
-# We compile pgvector from source using MSVC, test it, then package.
+# We download pre-built binaries from EnterpriseDB (same approach as zonkyio)
+# and compile only pgvector from source using MSVC.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,38 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PG_VERSION="${PG_VERSION:-18.1}"
 PGVECTOR_VERSION="${PGVECTOR_VERSION:-v0.8.1}"
 BUNDLE_VERSION="${BUNDLE_VERSION:-$PG_VERSION}"
-
-# PGROOT: either set by caller, auto-detected from common install paths, or
-# downloaded from EDB.
-if [ -z "${PGROOT:-}" ]; then
-  for candidate in \
-    "/c/Program Files/PostgreSQL/${PG_VERSION%%.*}" \
-    "/c/Program Files/PostgreSQL/${PG_VERSION}"; do
-    if [ -d "$candidate/bin" ]; then
-      PGROOT="$candidate"
-      break
-    fi
-  done
-fi
-
-if [ -z "${PGROOT:-}" ] || [ ! -d "${PGROOT}/bin" ]; then
-  echo "No existing PostgreSQL found — downloading EDB binaries..."
-  EDB_ZIP="postgresql-${PG_VERSION}-windows-x64-binaries.zip"
-  EDB_URL="https://get.enterprisedb.com/postgresql/${EDB_ZIP}"
-  mkdir -p "$SRC"
-  if [ ! -f "$SRC/$EDB_ZIP" ]; then
-    echo "Downloading: $EDB_URL"
-    curl -fL -A "Mozilla/5.0" -o "$SRC/$EDB_ZIP" "$EDB_URL"
-  fi
-  rm -rf "$WORK/pgsql"
-  unzip -q "$SRC/$EDB_ZIP" -d "$WORK"
-  PGROOT="$WORK/pgsql"
-fi
-
-if [ ! -d "${PGROOT}/bin" ]; then
-  echo "PGROOT invalid: ${PGROOT}"
-  exit 1
-fi
+PG_MAJOR="${PG_VERSION%%.*}"
 
 PLATFORM_ID="windows-amd64"
 TXZ_NAME="postgres-windows-x86_64.txz"
@@ -58,7 +26,6 @@ mkdir -p "$SRC" "$DIST"
 echo "PG_VERSION=$PG_VERSION"
 echo "PGVECTOR_VERSION=$PGVECTOR_VERSION"
 echo "BUNDLE_VERSION=$BUNDLE_VERSION"
-echo "PGROOT=$PGROOT"
 
 # Postgres 18 changed server APIs used by pgvector.
 if [[ "$PG_VERSION" == 18.* ]] && [[ "$PGVECTOR_VERSION" == "v0.8.0" || "$PGVECTOR_VERSION" == "0.8.0" ]]; then
@@ -66,9 +33,33 @@ if [[ "$PG_VERSION" == 18.* ]] && [[ "$PGVECTOR_VERSION" == "v0.8.0" || "$PGVECT
   exit 1
 fi
 
-echo "Building pgvector ${PGVECTOR_VERSION} against Postgres ${PG_VERSION} for ${PLATFORM_ID}"
+echo "Building Postgres ${PG_VERSION} + pgvector ${PGVECTOR_VERSION} for ${PLATFORM_ID}"
 
-# --- Step 1: Build pgvector with MSVC ---------------------------------------
+# --- Step 1: Obtain PostgreSQL installation ----------------------------------
+# Use PGROOT if explicitly set, otherwise download from EDB.
+
+if [ -z "${PGROOT:-}" ] || [ ! -d "${PGROOT}/bin" ]; then
+  EDB_ZIP="postgresql-${PG_VERSION}-windows-x64-binaries.zip"
+  EDB_URL="https://get.enterprisedb.com/postgresql/${EDB_ZIP}"
+  mkdir -p "$SRC"
+  if [ ! -f "$SRC/$EDB_ZIP" ]; then
+    echo "Downloading EDB binaries: $EDB_URL"
+    curl -fL -A "Mozilla/5.0" -o "$SRC/$EDB_ZIP" "$EDB_URL"
+  fi
+  rm -rf "$WORK/pgsql"
+  echo "Extracting EDB binaries..."
+  unzip -q "$SRC/$EDB_ZIP" -d "$WORK"
+  PGROOT="$WORK/pgsql"
+fi
+
+if [ ! -d "${PGROOT}/bin" ]; then
+  echo "PGROOT invalid: ${PGROOT}"
+  exit 1
+fi
+
+echo "PGROOT=$PGROOT"
+
+# --- Step 2: Build pgvector with MSVC ---------------------------------------
 
 cd "$SRC"
 rm -rf pgvector
@@ -99,11 +90,23 @@ PGVECTOR_SRC_WIN="$(cygpath -w "$SRC/pgvector")"
 echo "Using vcvars64.bat: $VCVARS_WIN"
 echo "PGROOT (Windows): $PGROOT_WIN"
 
-cmd.exe //C "call \"${VCVARS_WIN}\" && cd /d \"${PGVECTOR_SRC_WIN}\" && set \"PGROOT=${PGROOT_WIN}\" && nmake /NOLOGO /F Makefile.win && nmake /NOLOGO /F Makefile.win install"
+# Write a temporary batch file to avoid cmd.exe quoting hell from Git Bash
+BATFILE="$WORK/build_pgvector.bat"
+cat > "$BATFILE" <<BATEOF
+@echo off
+call "$VCVARS_WIN"
+cd /d "$PGVECTOR_SRC_WIN"
+set "PGROOT=$PGROOT_WIN"
+nmake /NOLOGO /F Makefile.win
+nmake /NOLOGO /F Makefile.win install
+BATEOF
+
+BATFILE_WIN="$(cygpath -w "$BATFILE")"
+cmd.exe //C "$BATFILE_WIN"
 
 echo "pgvector built and installed into PGROOT"
 
-# --- Step 2: Test pgvector loads --------------------------------------------
+# --- Step 3: Test pgvector loads --------------------------------------------
 
 INITDB="$PGROOT/bin/initdb.exe"
 PG_CTL="$PGROOT/bin/pg_ctl.exe"
@@ -138,7 +141,7 @@ fi
 
 echo "OK: pgvector extension loads"
 
-# --- Step 3: Package --------------------------------------------------------
+# --- Step 4: Package --------------------------------------------------------
 
 TMP="$(mktemp -d)"
 
