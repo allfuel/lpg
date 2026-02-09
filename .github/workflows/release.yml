@@ -115,11 +115,6 @@ jobs:
       - name: Show runner info
         run: systeminfo | findstr /B /C:"OS Name" /C:"OS Version" /C:"System Type"
 
-      - name: Install PostgreSQL
-        uses: ankane/setup-postgres@v1
-        with:
-          postgres-version: ${{ inputs.pg_version || '18' }}
-
       - name: Build
         shell: bash
         env:

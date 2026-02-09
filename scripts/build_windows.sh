@@ -13,9 +13,9 @@ PG_VERSION="${PG_VERSION:-18.1}"
 PGVECTOR_VERSION="${PGVECTOR_VERSION:-v0.8.1}"
 BUNDLE_VERSION="${BUNDLE_VERSION:-$PG_VERSION}"
 
-# PGROOT must be set by the caller (CI workflow sets it from setup-postgres)
+# PGROOT: either set by caller, auto-detected from common install paths, or
+# downloaded from EDB.
 if [ -z "${PGROOT:-}" ]; then
-  # Try common install locations
   for candidate in \
     "/c/Program Files/PostgreSQL/${PG_VERSION%%.*}" \
     "/c/Program Files/PostgreSQL/${PG_VERSION}"; do
@@ -27,7 +27,21 @@ if [ -z "${PGROOT:-}" ]; then
 fi
 
 if [ -z "${PGROOT:-}" ] || [ ! -d "${PGROOT}/bin" ]; then
-  echo "PGROOT not set or invalid. Install PostgreSQL first (e.g. ankane/setup-postgres)."
+  echo "No existing PostgreSQL found — downloading EDB binaries..."
+  EDB_ZIP="postgresql-${PG_VERSION}-windows-x64-binaries.zip"
+  EDB_URL="https://get.enterprisedb.com/postgresql/${EDB_ZIP}"
+  mkdir -p "$SRC"
+  if [ ! -f "$SRC/$EDB_ZIP" ]; then
+    echo "Downloading: $EDB_URL"
+    curl -fL -A "Mozilla/5.0" -o "$SRC/$EDB_ZIP" "$EDB_URL"
+  fi
+  rm -rf "$WORK/pgsql"
+  unzip -q "$SRC/$EDB_ZIP" -d "$WORK"
+  PGROOT="$WORK/pgsql"
+fi
+
+if [ ! -d "${PGROOT}/bin" ]; then
+  echo "PGROOT invalid: ${PGROOT}"
   exit 1
 fi
 
