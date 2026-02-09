@@ -50,12 +50,26 @@ if [ -n "${PGROOT:-}" ] && [ -d "${PGROOT}/bin" ]; then
 fi
 
 if [ -z "${PGROOT:-}" ] || [ ! -d "${PGROOT}/bin" ]; then
-  EDB_ZIP="postgresql-${PG_VERSION}-windows-x64-binaries.zip"
-  EDB_URL="https://get.enterprisedb.com/postgresql/${EDB_ZIP}"
+  EDB_BASE="https://get.enterprisedb.com/postgresql"
+  EDB_ZIP=""
   mkdir -p "$SRC"
-  if [ ! -f "$SRC/$EDB_ZIP" ]; then
-    echo "Downloading EDB binaries: $EDB_URL"
-    curl -fL -A "Mozilla/5.0" -o "$SRC/$EDB_ZIP" "$EDB_URL"
+  # EDB uses build suffixes (-1, -2, etc.) that vary per release. Try common patterns.
+  for suffix in "" "-1" "-2" "-3"; do
+    candidate="postgresql-${PG_VERSION}${suffix}-windows-x64-binaries.zip"
+    if [ -f "$SRC/$candidate" ]; then
+      EDB_ZIP="$candidate"
+      break
+    fi
+    echo "Trying: $EDB_BASE/$candidate"
+    if curl -fL -o "$SRC/$candidate" "$EDB_BASE/$candidate" 2>/dev/null; then
+      EDB_ZIP="$candidate"
+      break
+    fi
+    rm -f "$SRC/$candidate"
+  done
+  if [ -z "$EDB_ZIP" ]; then
+    echo "Could not download EDB binaries for PG $PG_VERSION"
+    exit 1
   fi
   rm -rf "$WORK/pgsql"
   echo "Extracting EDB binaries..."
