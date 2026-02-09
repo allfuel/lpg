@@ -202,12 +202,15 @@ printf "Manifest-Version: 1.0\n" > "$TMP/jar/META-INF/MANIFEST.MF"
 cp "$TXZ_OUT" "$TMP/jar/$(basename "$TXZ_OUT")"
 
 # Windows runners may not have zip; use PowerShell as fallback
-JAR_OUT_WIN="$(cygpath -w "$JAR_OUT")"
-JAR_DIR_WIN="$(cygpath -w "$TMP/jar")"
 if command -v zip >/dev/null 2>&1; then
   (cd "$TMP/jar" && zip -q -r "$JAR_OUT" .)
 else
-  powershell.exe -NoProfile -Command "Compress-Archive -Path '${JAR_DIR_WIN}\\*' -DestinationPath '${JAR_OUT_WIN}' -Force"
+  # Compress-Archive only accepts .zip extension, so create as .zip then rename
+  JAR_DIR_WIN="$(cygpath -w "$TMP/jar")"
+  ZIP_TMP="${JAR_OUT%.jar}.zip"
+  ZIP_TMP_WIN="$(cygpath -w "$ZIP_TMP")"
+  powershell.exe -NoProfile -Command "Compress-Archive -Path '${JAR_DIR_WIN}\\*' -DestinationPath '${ZIP_TMP_WIN}' -Force"
+  mv "$ZIP_TMP" "$JAR_OUT"
 fi
 
 rm -rf "$TMP"
