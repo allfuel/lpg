@@ -36,7 +36,18 @@ fi
 echo "Building Postgres ${PG_VERSION} + pgvector ${PGVECTOR_VERSION} for ${PLATFORM_ID}"
 
 # --- Step 1: Obtain PostgreSQL installation ----------------------------------
-# Use PGROOT if explicitly set, otherwise download from EDB.
+# Always download matching EDB binaries unless PGROOT is explicitly set AND
+# matches the requested version. The Windows runner may have a different PG
+# version pre-installed (e.g. PG 17 in PGROOT).
+
+if [ -n "${PGROOT:-}" ] && [ -d "${PGROOT}/bin" ]; then
+  # Verify pre-set PGROOT matches requested version
+  FOUND_VER="$("$PGROOT/bin/postgres.exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || true)"
+  if [ "$FOUND_VER" != "$PG_VERSION" ]; then
+    echo "PGROOT ($PGROOT) has PG $FOUND_VER but need $PG_VERSION — ignoring"
+    unset PGROOT
+  fi
+fi
 
 if [ -z "${PGROOT:-}" ] || [ ! -d "${PGROOT}/bin" ]; then
   EDB_ZIP="postgresql-${PG_VERSION}-windows-x64-binaries.zip"
@@ -176,11 +187,14 @@ mkdir -p "$TMP/jar/META-INF"
 printf "Manifest-Version: 1.0\n" > "$TMP/jar/META-INF/MANIFEST.MF"
 cp "$TXZ_OUT" "$TMP/jar/$(basename "$TXZ_OUT")"
 
-ZIP="${ZIP:-}"
-if [ -z "$ZIP" ]; then
-  ZIP=zip
+# Windows runners may not have zip; use PowerShell as fallback
+JAR_OUT_WIN="$(cygpath -w "$JAR_OUT")"
+JAR_DIR_WIN="$(cygpath -w "$TMP/jar")"
+if command -v zip >/dev/null 2>&1; then
+  (cd "$TMP/jar" && zip -q -r "$JAR_OUT" .)
+else
+  powershell.exe -NoProfile -Command "Compress-Archive -Path '${JAR_DIR_WIN}\\*' -DestinationPath '${JAR_OUT_WIN}' -Force"
 fi
-(cd "$TMP/jar" && "$ZIP" -q -r "$JAR_OUT" .)
 
 rm -rf "$TMP"
 
