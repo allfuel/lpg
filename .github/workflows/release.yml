@@ -10,7 +10,7 @@ on:
       pgvector_version:
         description: "pgvector git tag (e.g. v0.8.0)"
         required: false
-        default: "v0.8.0"
+        default: "v0.8.1"
       bundle_version:
         description: "Bundle version for artifact naming"
         required: false
@@ -18,6 +18,9 @@ on:
   push:
     tags:
       - "v*"
+
+permissions:
+  contents: write
 
 jobs:
   darwin-arm64:
@@ -31,12 +34,16 @@ jobs:
       - name: Build
         env:
           PG_VERSION: ${{ inputs.pg_version || '18.1' }}
-          PGVECTOR_VERSION: ${{ inputs.pgvector_version || 'v0.8.0' }}
+          PGVECTOR_VERSION: ${{ inputs.pgvector_version || 'v0.8.1' }}
           BUNDLE_VERSION: ${{ inputs.bundle_version }}
         run: |
           chmod +x scripts/*.sh
           if [ -z "${BUNDLE_VERSION}" ]; then
-            export BUNDLE_VERSION="${PG_VERSION}"
+            if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+              export BUNDLE_VERSION="${GITHUB_REF_NAME#v}"
+            else
+              export BUNDLE_VERSION="${PG_VERSION}"
+            fi
           fi
           ./scripts/build_darwin_arm64.sh
       - name: Upload artifacts
@@ -44,4 +51,11 @@ jobs:
         with:
           name: embedded-postgres-darwin-arm64
           path: dist/*
-
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/postgres-darwin-arm_64.txz
+            dist/embedded-postgres-binaries-darwin-arm64v8-*.jar
+          generate_release_notes: true
