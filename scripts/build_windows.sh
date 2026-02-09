@@ -2,20 +2,15 @@
 # Windows build script — runs in Git Bash on GitHub Actions Windows runners.
 #
 # Unlike Unix builds, Windows PostgreSQL is NOT compiled from source.
-# We download pre-built binaries from EnterpriseDB (same approach as zonkyio)
-# and compile only pgvector from source using MSVC.
+# We download pre-built binaries from EnterpriseDB and compile only pgvector
+# from source using MSVC.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 PG_VERSION="${PG_VERSION:-18.1}"
 PGVECTOR_VERSION="${PGVECTOR_VERSION:-v0.8.1}"
-BUNDLE_VERSION="${BUNDLE_VERSION:-$PG_VERSION}"
-PG_MAJOR="${PG_VERSION%%.*}"
-
-PLATFORM_ID="windows-amd64"
-TXZ_NAME="postgres-windows-x86_64.txz"
-JAR_NAME="embedded-postgres-binaries-${PLATFORM_ID}-${BUNDLE_VERSION}.jar"
+ARCHIVE_NAME="postgres-windows-x86_64.tar.gz"
 
 WORK="$ROOT/build"
 SRC="$WORK/src"
@@ -25,7 +20,6 @@ mkdir -p "$SRC" "$DIST"
 
 echo "PG_VERSION=$PG_VERSION"
 echo "PGVECTOR_VERSION=$PGVECTOR_VERSION"
-echo "BUNDLE_VERSION=$BUNDLE_VERSION"
 
 # Postgres 18 changed server APIs used by pgvector.
 if [[ "$PG_VERSION" == 18.* ]] && [[ "$PGVECTOR_VERSION" == "v0.8.0" || "$PGVECTOR_VERSION" == "0.8.0" ]]; then
@@ -33,7 +27,7 @@ if [[ "$PG_VERSION" == 18.* ]] && [[ "$PGVECTOR_VERSION" == "v0.8.0" || "$PGVECT
   exit 1
 fi
 
-echo "Building Postgres ${PG_VERSION} + pgvector ${PGVECTOR_VERSION} for ${PLATFORM_ID}"
+echo "Building Postgres ${PG_VERSION} + pgvector ${PGVECTOR_VERSION} for windows-amd64"
 
 # --- Step 1: Obtain PostgreSQL installation ----------------------------------
 # Always download matching EDB binaries unless PGROOT is explicitly set AND
@@ -190,31 +184,12 @@ cp "$PGROOT"/lib/*.lib "$STAGE/lib/" 2>/dev/null || true
 # Share (extension SQL files, timezone data, etc.)
 cp -r "$PGROOT/share"/* "$STAGE/share/" 2>/dev/null || true
 
-TXZ_OUT="$DIST/$TXZ_NAME"
-JAR_OUT="$DIST/$JAR_NAME"
+ARCHIVE_OUT="$DIST/$ARCHIVE_NAME"
 
-echo "Packaging txz: $TXZ_OUT"
-tar -cJf "$TXZ_OUT" -C "$STAGE" bin lib share
-
-echo "Packaging jar: $JAR_OUT"
-mkdir -p "$TMP/jar/META-INF"
-printf "Manifest-Version: 1.0\n" > "$TMP/jar/META-INF/MANIFEST.MF"
-cp "$TXZ_OUT" "$TMP/jar/$(basename "$TXZ_OUT")"
-
-# Windows runners may not have zip; use PowerShell as fallback
-if command -v zip >/dev/null 2>&1; then
-  (cd "$TMP/jar" && zip -q -r "$JAR_OUT" .)
-else
-  # Compress-Archive only accepts .zip extension, so create as .zip then rename
-  JAR_DIR_WIN="$(cygpath -w "$TMP/jar")"
-  ZIP_TMP="${JAR_OUT%.jar}.zip"
-  ZIP_TMP_WIN="$(cygpath -w "$ZIP_TMP")"
-  powershell.exe -NoProfile -Command "Compress-Archive -Path '${JAR_DIR_WIN}\\*' -DestinationPath '${ZIP_TMP_WIN}' -Force"
-  mv "$ZIP_TMP" "$JAR_OUT"
-fi
+echo "Packaging tar.gz: $ARCHIVE_OUT"
+tar -czf "$ARCHIVE_OUT" -C "$STAGE" bin lib share
 
 rm -rf "$TMP"
 
 echo "Done:"
-echo "  - $TXZ_OUT"
-echo "  - $JAR_OUT"
+echo "  - $ARCHIVE_OUT"

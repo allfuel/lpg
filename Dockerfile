@@ -6,7 +6,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     pkg-config \
     patchelf \
-    zip \
     zlib1g-dev \
     xz-utils \
     bzip2 \

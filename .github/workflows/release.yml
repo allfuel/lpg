@@ -11,10 +11,6 @@ on:
         description: "pgvector git tag (e.g. v0.8.0)"
         required: false
         default: "v0.8.1"
-      bundle_version:
-        description: "Bundle version for artifact naming"
-        required: false
-        default: ""
   push:
     tags:
       - "v*"
@@ -32,26 +28,22 @@ jobs:
             runner: macos-14
             platform: darwin
             arch: arm64
-            txz_glob: "postgres-darwin-arm_64.txz"
-            jar_glob: "embedded-postgres-binaries-darwin-arm64v8-*.jar"
+            archive_glob: "postgres-darwin-arm_64.tar.gz"
           - target: darwin-amd64
             runner: macos-15-intel
             platform: darwin
             arch: amd64
-            txz_glob: "postgres-darwin-x86_64.txz"
-            jar_glob: "embedded-postgres-binaries-darwin-amd64-*.jar"
+            archive_glob: "postgres-darwin-x86_64.tar.gz"
           - target: linux-amd64
             runner: ubuntu-latest
             platform: linux
             arch: amd64
-            txz_glob: "postgres-linux-x86_64.txz"
-            jar_glob: "embedded-postgres-binaries-linux-amd64-*.jar"
+            archive_glob: "postgres-linux-x86_64.tar.gz"
           - target: linux-arm64
             runner: ubuntu-24.04-arm
             platform: linux
             arch: arm64
-            txz_glob: "postgres-linux-arm_64.txz"
-            jar_glob: "embedded-postgres-binaries-linux-arm64v8-*.jar"
+            archive_glob: "postgres-linux-arm_64.tar.gz"
 
     runs-on: ${{ matrix.runner }}
     name: ${{ matrix.target }}
@@ -69,25 +61,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential curl git pkg-config patchelf zip \
+            build-essential curl git pkg-config patchelf \
             zlib1g-dev xz-utils bzip2
 
       - name: Build
         env:
           PG_VERSION: ${{ inputs.pg_version || '18.1' }}
           PGVECTOR_VERSION: ${{ inputs.pgvector_version || 'v0.8.1' }}
-          BUNDLE_VERSION: ${{ inputs.bundle_version }}
           PLATFORM: ${{ matrix.platform }}
           ARCH: ${{ matrix.arch }}
         run: |
           chmod +x scripts/*.sh
-          if [ -z "${BUNDLE_VERSION}" ]; then
-            if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
-              export BUNDLE_VERSION="${GITHUB_REF_NAME#v}"
-            else
-              export BUNDLE_VERSION="${PG_VERSION}"
-            fi
-          fi
           ./scripts/build.sh
 
       - name: Upload artifacts
@@ -101,8 +85,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/${{ matrix.txz_glob }}
-            dist/${{ matrix.jar_glob }}
+            dist/${{ matrix.archive_glob }}
           generate_release_notes: true
 
   build-windows:
@@ -120,16 +103,8 @@ jobs:
         env:
           PG_VERSION: ${{ inputs.pg_version || '18.1' }}
           PGVECTOR_VERSION: ${{ inputs.pgvector_version || 'v0.8.1' }}
-          BUNDLE_VERSION: ${{ inputs.bundle_version }}
         run: |
           chmod +x scripts/*.sh
-          if [ -z "${BUNDLE_VERSION}" ]; then
-            if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
-              export BUNDLE_VERSION="${GITHUB_REF_NAME#v}"
-            else
-              export BUNDLE_VERSION="${PG_VERSION}"
-            fi
-          fi
           ./scripts/build_windows.sh
 
       - name: Upload artifacts
@@ -143,6 +118,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/postgres-windows-x86_64.txz
-            dist/embedded-postgres-binaries-windows-amd64-*.jar
+            dist/postgres-windows-x86_64.tar.gz
           generate_release_notes: true

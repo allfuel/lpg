@@ -6,15 +6,16 @@ This repo builds a relocatable Postgres distribution with `pgvector` pre-install
 
 Each release publishes artifacts for all supported platforms:
 
-| Platform | TXZ | JAR |
-|----------|-----|-----|
-| darwin arm64 | `postgres-darwin-arm_64.txz` | `embedded-postgres-binaries-darwin-arm64v8-<ver>.jar` |
-| darwin amd64 | `postgres-darwin-x86_64.txz` | `embedded-postgres-binaries-darwin-amd64-<ver>.jar` |
-| linux amd64 | `postgres-linux-x86_64.txz` | `embedded-postgres-binaries-linux-amd64-<ver>.jar` |
+| Platform | TAR.GZ |
+|----------|-----|
+| darwin arm64 | `postgres-darwin-arm_64.tar.gz` |
+| darwin amd64 | `postgres-darwin-x86_64.tar.gz` |
+| linux arm64 | `postgres-linux-arm_64.tar.gz` |
+| linux amd64 | `postgres-linux-x86_64.tar.gz` |
+| windows amd64 | `postgres-windows-x86_64.tar.gz` |
 
 Notes:
-- The `.jar` is just a zip wrapper containing the platform-specific `.txz` + `META-INF/MANIFEST.MF` (mirrors `embedded-postgres-binaries-*` layout).
-- The `.txz` contains only runtime dirs at the archive root: `bin/`, `lib/`, `share/`.
+- The `.tar.gz` contains only runtime dirs at the archive root: `bin/`, `lib/`, `share/`.
 - `bin/` is intentionally minimal: `postgres`, `pg_ctl`, `initdb`, `pg_isready`.
 
 ## Version Inputs
@@ -23,9 +24,6 @@ The build is controlled by env vars / workflow inputs:
 
 - `PG_VERSION`: Postgres version to build (example: `18.1`)
 - `PGVECTOR_VERSION`: pgvector git tag to build (example: `v0.8.1`)
-- `BUNDLE_VERSION`: suffix used in the `.jar` filename (example: `18.1-pgvector0.8.1`)
-
-In CI, if `BUNDLE_VERSION` is not set and the workflow is running on a tag, `BUNDLE_VERSION` defaults to the tag name without the leading `v`.
 
 ## Tag Naming Convention
 
@@ -37,20 +35,14 @@ Example:
 
 - `v18.1-pgvector0.8.1`
 
-This produces (for each platform):
-
-- `embedded-postgres-binaries-darwin-arm64v8-18.1-pgvector0.8.1.jar`
-- `embedded-postgres-binaries-darwin-amd64-18.1-pgvector0.8.1.jar`
-- `embedded-postgres-binaries-linux-amd64-18.1-pgvector0.8.1.jar`
-
 ## Release Steps (CI)
 
 1. Ensure `scripts/build.sh` defaults are correct for the versions you want.
 2. Push a tag:
    - `git tag v18.1-pgvector0.8.1`
    - `git push origin v18.1-pgvector0.8.1`
-3. Wait for GitHub Actions workflow `build-embedded-postgres` to finish. All 3 platforms build in parallel.
-4. Open the GitHub Release created for that tag and confirm all 6 assets are attached (txz + jar per platform).
+3. Wait for GitHub Actions workflow `build-embedded-postgres` to finish. All 5 platforms build in parallel.
+4. Open the GitHub Release created for that tag and confirm all 5 `.tar.gz` assets are attached.
 
 The workflow file is `.github/workflows/release.yml`.
 
@@ -62,7 +54,6 @@ If you want a one-off build without tagging:
 2. Provide inputs:
    - `pg_version` (example `18.1`)
    - `pgvector_version` (example `v0.8.1`)
-   - `bundle_version` (optional, otherwise defaults to `pg_version`)
 3. Download artifacts from the workflow run ("Artifacts" section). There will be one artifact per platform.
 
 `workflow_dispatch` uploads artifacts, but only tag builds upload to GitHub Releases.
@@ -71,10 +62,10 @@ If you want a one-off build without tagging:
 
 ### macOS
 
-After downloading `postgres-darwin-arm_64.txz` (or `postgres-darwin-x86_64.txz`):
+After downloading `postgres-darwin-arm_64.tar.gz` (or `postgres-darwin-x86_64.tar.gz`):
 
 1. Extract it:
-   - `mkdir -p /tmp/epg && tar -xJf postgres-darwin-arm_64.txz -C /tmp/epg`
+   - `mkdir -p /tmp/epg && tar -xzf postgres-darwin-arm_64.tar.gz -C /tmp/epg`
 2. Confirm `pg_isready` and `initdb` are relocatable (libpq uses `@loader_path`):
    - `otool -L /tmp/epg/bin/initdb | head`
    - `otool -L /tmp/epg/bin/pg_isready | head`
@@ -86,10 +77,10 @@ After downloading `postgres-darwin-arm_64.txz` (or `postgres-darwin-x86_64.txz`)
 
 ### Linux
 
-After downloading `postgres-linux-x86_64.txz`:
+After downloading `postgres-linux-x86_64.tar.gz`:
 
 1. Extract it:
-   - `mkdir -p /tmp/epg && tar -xJf postgres-linux-x86_64.txz -C /tmp/epg`
+   - `mkdir -p /tmp/epg && tar -xzf postgres-linux-x86_64.tar.gz -C /tmp/epg`
 2. Confirm binaries have correct RPATH:
    - `readelf -d /tmp/epg/bin/initdb | grep RPATH`
    - Should show `$ORIGIN/../lib`
