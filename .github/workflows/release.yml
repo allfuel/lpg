@@ -104,3 +104,45 @@ jobs:
             dist/${{ matrix.txz_glob }}
             dist/${{ matrix.jar_glob }}
           generate_release_notes: true
+
+  build-windows:
+    runs-on: windows-latest
+    name: windows-amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show runner info
+        run: systeminfo | findstr /B /C:"OS Name" /C:"OS Version" /C:"System Type"
+
+      - name: Build
+        shell: bash
+        env:
+          PG_VERSION: ${{ inputs.pg_version || '18.1' }}
+          PGVECTOR_VERSION: ${{ inputs.pgvector_version || 'v0.8.1' }}
+          BUNDLE_VERSION: ${{ inputs.bundle_version }}
+        run: |
+          chmod +x scripts/*.sh
+          if [ -z "${BUNDLE_VERSION}" ]; then
+            if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+              export BUNDLE_VERSION="${GITHUB_REF_NAME#v}"
+            else
+              export BUNDLE_VERSION="${PG_VERSION}"
+            fi
+          fi
+          ./scripts/build_windows.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-postgres-windows-amd64
+          path: dist/*
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/postgres-windows-x86_64.txz
+            dist/embedded-postgres-binaries-windows-amd64-*.jar
+          generate_release_notes: true
