@@ -46,6 +46,12 @@ jobs:
             arch: amd64
             txz_glob: "postgres-linux-x86_64.txz"
             jar_glob: "embedded-postgres-binaries-linux-amd64-*.jar"
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            txz_glob: "postgres-linux-arm_64.txz"
+            jar_glob: "embedded-postgres-binaries-linux-arm64v8-*.jar"
 
     runs-on: ${{ matrix.runner }}
     name: ${{ matrix.target }}
