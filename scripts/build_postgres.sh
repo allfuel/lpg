@@ -21,7 +21,7 @@ tar -xjf "$TARBALL"
 
 cd "postgresql-${PG_VERSION}"
 
-JOBS="$(sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN || echo 4)"
+JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN || echo 4)"
 
 ./configure \
   --prefix="$PREFIX" \

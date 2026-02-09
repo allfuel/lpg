@@ -22,7 +22,7 @@ cd pgvector
 echo "pgvector HEAD: $(git rev-parse HEAD)"
 git describe --tags --always 2>/dev/null || true
 
-JOBS="$(sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN || echo 4)"
+JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN || echo 4)"
 
 make -j"$JOBS" PG_CONFIG="$PG_CONFIG"
 make install PG_CONFIG="$PG_CONFIG"
