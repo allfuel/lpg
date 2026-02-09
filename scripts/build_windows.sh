@@ -2,8 +2,9 @@
 # Windows build script — runs in Git Bash on GitHub Actions Windows runners.
 #
 # Unlike Unix builds, Windows PostgreSQL is NOT compiled from source.
-# We download pre-built binaries from EnterpriseDB (same approach as zonkyio)
-# and compile only pgvector from source using MSVC.
+# PGROOT must point to an existing PostgreSQL installation (set by the CI
+# workflow via ankane/setup-postgres or a manual install).
+# We compile pgvector from source using MSVC, test it, then package.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,6 +12,24 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PG_VERSION="${PG_VERSION:-18.1}"
 PGVECTOR_VERSION="${PGVECTOR_VERSION:-v0.8.1}"
 BUNDLE_VERSION="${BUNDLE_VERSION:-$PG_VERSION}"
+
+# PGROOT must be set by the caller (CI workflow sets it from setup-postgres)
+if [ -z "${PGROOT:-}" ]; then
+  # Try common install locations
+  for candidate in \
+    "/c/Program Files/PostgreSQL/${PG_VERSION%%.*}" \
+    "/c/Program Files/PostgreSQL/${PG_VERSION}"; do
+    if [ -d "$candidate/bin" ]; then
+      PGROOT="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "${PGROOT:-}" ] || [ ! -d "${PGROOT}/bin" ]; then
+  echo "PGROOT not set or invalid. Install PostgreSQL first (e.g. ankane/setup-postgres)."
+  exit 1
+fi
 
 PLATFORM_ID="windows-amd64"
 TXZ_NAME="postgres-windows-x86_64.txz"
@@ -25,6 +44,7 @@ mkdir -p "$SRC" "$DIST"
 echo "PG_VERSION=$PG_VERSION"
 echo "PGVECTOR_VERSION=$PGVECTOR_VERSION"
 echo "BUNDLE_VERSION=$BUNDLE_VERSION"
+echo "PGROOT=$PGROOT"
 
 # Postgres 18 changed server APIs used by pgvector.
 if [[ "$PG_VERSION" == 18.* ]] && [[ "$PGVECTOR_VERSION" == "v0.8.0" || "$PGVECTOR_VERSION" == "0.8.0" ]]; then
@@ -32,31 +52,9 @@ if [[ "$PG_VERSION" == 18.* ]] && [[ "$PGVECTOR_VERSION" == "v0.8.0" || "$PGVECT
   exit 1
 fi
 
-echo "Building Postgres ${PG_VERSION} + pgvector ${PGVECTOR_VERSION} for ${PLATFORM_ID}"
+echo "Building pgvector ${PGVECTOR_VERSION} against Postgres ${PG_VERSION} for ${PLATFORM_ID}"
 
-# --- Step 1: Download pre-built EDB binaries --------------------------------
-
-EDB_ZIP="postgresql-${PG_VERSION}-windows-x64-binaries.zip"
-EDB_URL="https://get.enterprisedb.com/postgresql/${EDB_ZIP}"
-PGROOT="$WORK/pgsql"
-
-if [ ! -f "$SRC/$EDB_ZIP" ]; then
-  echo "Downloading EDB binaries: $EDB_URL"
-  curl -fL -o "$SRC/$EDB_ZIP" "$EDB_URL"
-fi
-
-rm -rf "$PGROOT"
-echo "Extracting EDB binaries..."
-unzip -q "$SRC/$EDB_ZIP" -d "$WORK"
-
-if [ ! -d "$PGROOT" ]; then
-  echo "Expected $PGROOT after extraction"
-  exit 1
-fi
-
-echo "EDB Postgres extracted to $PGROOT"
-
-# --- Step 2: Build pgvector with MSVC ---------------------------------------
+# --- Step 1: Build pgvector with MSVC ---------------------------------------
 
 cd "$SRC"
 rm -rf pgvector
@@ -66,9 +64,9 @@ cd pgvector
 
 echo "pgvector HEAD: $(git rev-parse HEAD)"
 
-# VCVARS_PATH is set by the CI workflow after locating vcvars64.bat
+# Find vcvars64.bat for MSVC environment
 if [ -z "${VCVARS_PATH:-}" ]; then
-  echo "VCVARS_PATH not set. Looking for vcvars64.bat..."
+  echo "Looking for vcvars64.bat..."
   VCVARS_PATH="$(find "/c/Program Files/Microsoft Visual Studio" -name vcvars64.bat 2>/dev/null | head -1 || true)"
   if [ -z "$VCVARS_PATH" ]; then
     VCVARS_PATH="$(find "/c/Program Files (x86)/Microsoft Visual Studio" -name vcvars64.bat 2>/dev/null | head -1 || true)"
@@ -79,20 +77,19 @@ if [ -z "${VCVARS_PATH:-}" ]; then
   fi
 fi
 
-# Convert Git Bash path to Windows path for cmd.exe
+# Convert Git Bash paths to Windows paths for cmd.exe
 VCVARS_WIN="$(cygpath -w "$VCVARS_PATH")"
 PGROOT_WIN="$(cygpath -w "$PGROOT")"
+PGVECTOR_SRC_WIN="$(cygpath -w "$SRC/pgvector")"
 
 echo "Using vcvars64.bat: $VCVARS_WIN"
-echo "PGROOT: $PGROOT_WIN"
-
-PGVECTOR_SRC_WIN="$(cygpath -w "$SRC/pgvector")"
+echo "PGROOT (Windows): $PGROOT_WIN"
 
 cmd.exe //C "call \"${VCVARS_WIN}\" && cd /d \"${PGVECTOR_SRC_WIN}\" && set \"PGROOT=${PGROOT_WIN}\" && nmake /NOLOGO /F Makefile.win && nmake /NOLOGO /F Makefile.win install"
 
 echo "pgvector built and installed into PGROOT"
 
-# --- Step 3: Test pgvector loads --------------------------------------------
+# --- Step 2: Test pgvector loads --------------------------------------------
 
 INITDB="$PGROOT/bin/initdb.exe"
 PG_CTL="$PGROOT/bin/pg_ctl.exe"
@@ -104,7 +101,6 @@ if [ ! -f "$INITDB" ] || [ ! -f "$PG_CTL" ] || [ ! -f "$PSQL" ]; then
 fi
 
 TESTDIR="$(mktemp -d)"
-trap 'rm -rf "$TESTDIR"' EXIT
 
 DATA="$TESTDIR/pgdata"
 LOG="$TESTDIR/postgres.log"
@@ -119,15 +115,16 @@ set -e
 
 "$PG_CTL" -D "$DATA" -m fast stop >/dev/null
 
+rm -rf "$TESTDIR"
+
 if [ "$STATUS" -ne 0 ]; then
   echo "Failed to CREATE EXTENSION vector"
-  tail -n 80 "$LOG" 2>/dev/null || true
   exit 1
 fi
 
 echo "OK: pgvector extension loads"
 
-# --- Step 4: Package --------------------------------------------------------
+# --- Step 3: Package --------------------------------------------------------
 
 TMP="$(mktemp -d)"
 
@@ -144,14 +141,9 @@ done
 # All DLLs from bin/ (needed for relocatability on Windows)
 cp "$PGROOT"/bin/*.dll "$STAGE/bin/" 2>/dev/null || true
 
-# Libraries
-cp -r "$PGROOT"/lib/*.dll "$STAGE/lib/" 2>/dev/null || true
-cp -r "$PGROOT"/lib/*.lib "$STAGE/lib/" 2>/dev/null || true
-
-# Extension files (pgvector .dll, .sql, .control)
-if [ -d "$PGROOT/lib" ]; then
-  cp "$PGROOT"/lib/vector.dll "$STAGE/lib/" 2>/dev/null || true
-fi
+# Libraries (DLLs + .lib files + pgvector)
+cp "$PGROOT"/lib/*.dll "$STAGE/lib/" 2>/dev/null || true
+cp "$PGROOT"/lib/*.lib "$STAGE/lib/" 2>/dev/null || true
 
 # Share (extension SQL files, timezone data, etc.)
 cp -r "$PGROOT/share"/* "$STAGE/share/" 2>/dev/null || true
@@ -172,6 +164,8 @@ if [ -z "$ZIP" ]; then
   ZIP=zip
 fi
 (cd "$TMP/jar" && "$ZIP" -q -r "$JAR_OUT" .)
+
+rm -rf "$TMP"
 
 echo "Done:"
 echo "  - $TXZ_OUT"
