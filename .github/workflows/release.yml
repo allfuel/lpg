@@ -35,7 +35,7 @@ jobs:
             txz_glob: "postgres-darwin-arm_64.txz"
             jar_glob: "embedded-postgres-binaries-darwin-arm64v8-*.jar"
           - target: darwin-amd64
-            runner: macos-13
+            runner: macos-15-intel
             platform: darwin
             arch: amd64
             txz_glob: "postgres-darwin-x86_64.txz"
